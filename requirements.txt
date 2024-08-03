@@ -1,1 +1,7 @@
 streamlit
+scipy
+plotly
+librosa
+pydub
+streamlit-vertical-slider
+streamlit-toggle
