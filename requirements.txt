@@ -5,3 +5,6 @@ librosa
 pydub
 streamlit-vertical-slider
 streamlit-toggle
+numpy
+matplotlib
+sounddevice
