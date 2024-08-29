@@ -7,6 +7,7 @@ import tempfile
 import matplotlib.pyplot as plt
 from scipy.signal import butter, lfilter
 import time
+import io
 
 from frequency_manipulation.utils import create_bandpass_filter, calculate_band_magnitudes
 
@@ -98,6 +99,19 @@ if st.session_state.audio_set:
     for center_freq, gain in zip(center_frequencies, gains):
         h = create_bandpass_filter(center_freq, bandwidth, sampling_rate, M)
         filtered_signal = np.convolve(samples, h, mode='same')
+
+        num_samples_5_sec = int(5 * sampling_rate)
+        filtered_signal_5_sec = filtered_signal[:num_samples_5_sec]
+
+        buffer = io.StringIO()
+        np.savetxt(buffer, filtered_signal_5_sec)
+        buffer.seek(0)
+
+        st.download_button(
+            label=f"Download do array filtrado da frequência {center_freq}Hz",
+            data=buffer.getvalue(),
+            file_name=f'{center_freq}_array.csv',
+            mime='text/plain')
         
         # Apply gain and add to the equalized signal
         equalized_signal += filtered_signal * (10 ** (gain / 20))
