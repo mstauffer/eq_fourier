@@ -4,6 +4,11 @@ import librosa
 import soundfile as sf
 from streamlit_vertical_slider import vertical_slider
 import tempfile
+import matplotlib.pyplot as plt
+from scipy.signal import butter, lfilter
+import time
+
+from frequency_manipulation.utils import create_bandpass_filter, calculate_band_magnitudes
 
 st.set_page_config(layout='wide')
 
@@ -33,16 +38,7 @@ with cs[0]:
             st.session_state.audio_set = True
         audio_path = f'{t.name}/audio'
 with cs[1]:
-    music = st.selectbox('Escolha uma música da nossa lib', [
-        'Miles Davis - Stella by Starlight (Jazz, Trumpete)',
-        'Boney James - Butter (Jazz, Sax)',
-        'Shaman - Fairy Tale (Rock, Coro Lírico no começo)',
-        'Beatles - Twist and Shout (Rock, Guitarra)',
-        'Soft Machine - Song of the Sunbird (Jazz, variados timbres de teclado)',
-        "One Republic - I Ain't Worried (Pop)",
-        'Rob Araujo - Deep (Jazz/Eletrônico)',
-        'Justin Bieber - Yummy (Pop)'
-    ])
+    music = st.selectbox('Escolha uma música da nossa lib', list(music_library.keys()))
     if music:
         audio_path = music_library.get(music)
         st.session_state.audio_set = True
@@ -50,63 +46,53 @@ with cs[1]:
 if st.session_state.audio_set:
     samples, sampling_rate = librosa.load(audio_path, sr=None)
 
-    st.title("Equalizador")
-    st.write('Original audio')
-    st.audio(data=audio_path, format="audio/wav")
+    slider_col, plot_col = st.columns(2)
+    
+    with slider_col:
+        st.write('Original audio')
+        st.audio(data=audio_path, format="audio/wav")
 
-    filters = [
-        "32Hz",
-        "64Hz",
-        "128Hz",
-        "256Hz",
-        "512Hz",
-        "1KHz",
-        "2KHz",
-        "4KHz",
-        "8KHz",
-        "16KHz",
-    ]
+        filters = [
+            "32Hz",
+            "64Hz",
+            "128Hz",
+            "256Hz",
+            "512Hz",
+            "1KHz",
+            "2KHz",
+            "4KHz",
+            "8KHz",
+            "16KHz",
+        ]
 
-    cols = st.columns(10)
-    gains = []
+        cols = st.columns(10)
+        gains = []
 
-    for filter, col in zip(filters, cols):
-        with col:
-            val = vertical_slider(
-                label=filter,
-                key=filter,
-                height=100,
-                thumb_shape="square",
-                step=1,
-                default_value=0,
-                min_value=-10,
-                max_value=10,
-                track_color="blue",
-                slider_color="lighgray",
-                thumb_color="orange",
-                value_always_visible=False
-            )
-            gains.append(val)
+        for filter, col in zip(filters, cols):
+            with col:
+                val = vertical_slider(
+                    label=filter,
+                    key=filter,
+                    height=100,
+                    thumb_shape="square",
+                    step=1,
+                    default_value=0,
+                    min_value=-10,
+                    max_value=10,
+                    track_color="blue",
+                    slider_color="lightgray",
+                    thumb_color="orange",
+                    value_always_visible=False
+                )
+                gains.append(val)
 
-    def create_bandpass_filter(center_freq, bandwidth, fs, M):
-        nyquist = 0.5 * fs
-        f_low = (center_freq - bandwidth / 2) / nyquist
-        f_high = (center_freq + bandwidth / 2) / nyquist
+    with plot_col:
+        filter_length = st.number_input('Filter Length', min_value=1, max_value=500, value=100)
 
-        # Use sinc to create bandpass filter
-        n = np.arange(-M // 2, M // 2 + 1)
-        h = np.sinc(2 * f_high * n) - np.sinc(2 * f_low * n)
-        window = np.hamming(M + 1)
-        h *= window
-        h /= np.sum(h)
-        
-        return h
-
-    M = 100  # Filter length
+    M = filter_length
     bandwidth = 0.2
 
     equalized_signal = np.zeros_like(samples)
-
     center_frequencies = [32, 64, 128, 256, 512, 1000, 2000, 4000, 8000, 16000]
 
     for center_freq, gain in zip(center_frequencies, gains):
@@ -116,13 +102,59 @@ if st.session_state.audio_set:
         # Apply gain and add to the equalized signal
         equalized_signal += filtered_signal * (10 ** (gain / 20))
 
-    # normalization for prevent clipping
+    # Normalization to prevent clipping
     max_amplitude = np.max(np.abs(equalized_signal))
     if max_amplitude > 1:
         equalized_signal /= max_amplitude
-
+    
     output_path = 'equalized_audio.wav'
     sf.write(output_path, equalized_signal, sampling_rate)
 
-    st.write('Filtered audio')
-    st.audio(data=output_path, format="audio/wav")
+    with slider_col:
+        st.write('Filtered audio')
+        st.audio(data=output_path, format="audio/wav")
+
+    with plot_col:
+        graphic_col, frame_rate_col = st.columns(2)
+        with graphic_col:
+            if st.button("Start Visualization"):
+                st.session_state.start_visualization = True
+        
+        with frame_rate_col:
+            frame_rate_val = st.number_input('Frame Rate',
+                                         min_value=15,
+                                         max_value=100,
+                                         value=15)
+        
+        chart_placeholder = st.empty()
+
+        if 'start_visualization' in st.session_state and st.session_state.start_visualization:
+            frame_rate = frame_rate_val
+            chunk_size = sampling_rate // frame_rate
+            audio_data, _ = sf.read(output_path)
+            start_time = time.time()
+
+            max_magnitude = 0.5
+
+            for i in range(0, len(audio_data), chunk_size):
+                elapsed_time = time.time() - start_time
+                
+                expected_time = i / sampling_rate
+
+                if elapsed_time < expected_time:
+                    time.sleep(expected_time - elapsed_time)
+
+                audio_chunk = audio_data[i:i + chunk_size]
+
+                band_magnitudes = calculate_band_magnitudes(audio_chunk, sampling_rate, center_frequencies)
+
+                plt.figure(figsize=(8, 4))
+                plt.bar(range(len(center_frequencies)), band_magnitudes, tick_label=[f"{f}Hz" for f in center_frequencies])
+                plt.xlabel('Frequency Band')
+                plt.ylabel('Magnitude')
+                plt.ylim(0, max_magnitude)
+
+                chart_placeholder.pyplot(plt)
+                plt.close()
+
+                time.sleep(1 / frame_rate)
